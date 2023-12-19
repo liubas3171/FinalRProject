@@ -1,0 +1,324 @@
+---
+title: "Data analysis"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+ 
+```{r}
+#install.packages("maps")
+```
+
+```{r}
+library(maps)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(scales)
+```
+```{r}
+# This helps R not to use scientific numbers for some charts
+options(scipen=5)
+```
+
+### Initial data reading and analysis
+
+```{r}
+file_path = '../v6_Latest_Data_Science_Salaries.csv'
+
+data_df <- read.csv(file_path)
+
+head(data_df)
+```
+
+```{r}
+summary(data_df)
+```
+Check if there are any missing values. There are not.
+```{r}
+any(is.na(data_df))
+```
+#### Frequency of values in categorical columns
+
+```{r}
+show_frequent_values <- function(df, threshold_to_show=0) {
+  char_columns <- names(df)[sapply(df, is.character)]
+  char_columns <- append(char_columns, "Year")
+
+  for (col in char_columns) {
+    cat("Frequency table for column:", col, "\n")
+    freq_table <- sort(table(df[[col]]), decreasing = TRUE)
+    print(freq_table[freq_table > threshold_to_show])
+    cat("\n")
+  }
+}
+```
+
+```{r}
+show_frequent_values(data_df, 10)
+```
+```{r}
+# svg("images/pie_charts.svg", width = 8, height = 6)
+
+# Showing 2 pies on one image
+par(mfrow = c(1, 2))
+
+category_counts <- table(data_df$Company.Size)
+pie(category_counts, labels = names(category_counts),
+    col=terrain.colors(3),
+    main = "Company Size distrubution")
+
+category_counts <- table(data_df$Experience.Level)
+pie(category_counts, labels = names(category_counts),
+    col=rainbow(4),
+    main = "Experience Level distrubution")
+
+par(mfrow = c(1, 1))
+
+# dev.off()
+```
+
+
+```{r}
+visualize_frequency_barchart <- function(freq_table, column_name) {
+  barplot(freq_table, main = paste("Frequency Bar Chart for", column_name),
+          xlab = column_name, ylab = "Frequency", col = "skyblue")
+}
+```
+
+
+```{r}
+freq_table <- sort(table(data_df[["Year"]]), decreasing = FALSE)
+visualize_frequency_barchart(freq_table, "")
+```
+
+```{r}
+# svg("images/salaries_hist.svg", width = 8, height = 6)
+
+hist(data_df$Salary.in.USD, main = "Histogram of salaries",
+     xlab = "Salary in USD", col = "skyblue", border = "black",
+     xlim=c(0, max(data_df$Salary.in.USD)),
+     breaks = 50, freq = TRUE)
+
+# dev.off()
+```
+
+
+### Maps visualising
+
+Harmonizing country names so that they are the same in my dataset and in maps
+```{r}
+country_mapping <- c(
+  "Czechia" = "Czech Republic",
+  "Gibraltar" = "UK",
+  "Hong Kong" = "China",
+  "Iran, Islamic Republic of" = "Iran",
+  "Korea, Republic of" = "South Korea",
+  "Moldova, Republic of" = "Moldova",
+  "Russian Federation" = "Russia",
+  "United Kingdom" = "UK",
+  "United States" = "USA"
+)
+
+data_df$Company.Location <- ifelse(data_df$Company.Location %in% names(country_mapping),
+                                   country_mapping[data_df$Company.Location],
+                                   data_df$Company.Location)
+data_df$Employee.Residence <- ifelse(data_df$Employee.Residence %in% names(country_mapping),
+                                   country_mapping[data_df$Employee.Residence],
+                                   data_df$Employee.Residence)
+```
+
+Finding countries where number of observations is less than 5
+```{r}
+n = 5
+freq_table <- sort(table(data_df[["Company.Location"]]), decreasing = TRUE)
+less_than_n_v <- c(freq_table[freq_table < n])
+```
+
+#### World
+
+Visualizing median salary per country. Black border means that there are less than 5 observations per this country.
+```{r}
+# code for saving pictures into files
+# svg("images/world_map.svg", width = 8, height = 6)
+
+median_salaries <- tapply(data_df$Salary.in.USD, data_df$Company.Location, median)
+median_df <- data.frame(country = names(median_salaries), median_salary = median_salaries)
+world_map <- map_data("world")
+
+# code to find which countries to map manually
+#merged_data_temp <- left_join(median_df,world_map, by = c("country" = "region"))
+#sort(unique(merged_data_temp$country[is.na(merged_data_temp$lat)]))
+
+merged_data <- left_join(world_map, median_df, by = c("region" = "country"))
+less_than_n = subset(merged_data, region %in% names(less_than_n_v))
+
+ggplot() +
+    geom_map(data = merged_data, map = merged_data,
+             aes(map_id = region,fill = median_salary),
+             color = "white", size = 0.1) +
+    geom_point(data = less_than_n,
+               aes(x = long, y = lat),
+               size = 0.01,
+               color = "black", fill = "black",
+               show.legend = "points") +
+    scale_fill_gradient(name = "Median Salary", low = "blue",
+                        high = "red", na.value = "grey",
+                        labels = scales::comma_format(scale = 1e-3, suffix = "K")) +
+    theme_minimal() +
+    labs(title = "World Map with Median Salary") +
+    expand_limits(x = merged_data$long, y = merged_data$lat)
+
+# code for saving pictures into files
+# dev.off()
+
+```
+#### Europe
+
+```{r}
+# svg("images/Europe_map.svg", width = 8, height = 6)
+
+map_border <- c(-13, 35, 40, 72)
+merged_data_europe <- subset(merged_data,
+                             long >= map_border[1] & long <= map_border[3] &
+                             lat >= map_border[2] & lat <= map_border[4])
+# array of countries with small number of observations
+less_than_n = subset(merged_data_europe, region %in% names(less_than_n_v))
+
+ggplot() +
+    geom_map(data = merged_data_europe, map = merged_data_europe,
+             aes(map_id = region, fill = median_salary),
+             color = "white", size = 0.1) +
+    geom_point(data = less_than_n,
+               aes(x = long, y = lat),
+               size = 0.6,
+               color = "black", fill = "black",
+               show.legend = "points") + 
+    scale_fill_gradient(name = "Median Salary", low = "blue",
+                        high = "red", na.value = "grey",
+                        labels = scales::comma_format(scale = 1e-3, suffix = "K")) +
+    theme_minimal() +
+    labs(title = "European Map with Median Salary") +
+    expand_limits(x = merged_data_europe$long, y = merged_data_europe$lat)
+
+# dev.off()
+
+```
+### Other observations
+
+#### Top median salary with n_obs > 5 around the world
+```{r}
+sorted_dataset <- median_df %>%
+                    filter(!(country %in% names(less_than_n_v))) %>%
+                    arrange(desc(median_salary))
+head(sorted_dataset, 10)
+```
+#### Top median salary among all countries
+```{r}
+overall_median = median_df %>% arrange(desc(median_salary))
+head(overall_median, 10)
+```
+
+#### Boxplot: other factors that imply salary
+
+```{r}
+plot_salary_boxplot <- function(group_level_column) {
+  return(ggplot(data_df, aes(x = reorder(.data[[group_level_column]], Salary.in.USD, median), y = Salary.in.USD)) +
+    geom_boxplot() +
+    labs(x = group_level_column, y = "Salary in USD") +
+    scale_y_continuous(labels = comma_format(scale = 1e-3, suffix = "K")))
+}
+```
+
+```{r}
+
+plt1 = plot_salary_boxplot("Experience.Level")
+plt2 = plot_salary_boxplot("Company.Size")
+plt3 = plot_salary_boxplot("Employment.Type")
+plt4 = plot_salary_boxplot("Year")
+
+grid.arrange(plt1, plt2, plt3, plt4, ncol = 2)
+```
+
+#### Best job title based on median salary
+```{r}
+median_salaries_per_title <- tapply(data_df$Salary.in.USD,
+                                    data_df$Job.Title, median)
+median_salaries_per_title <- data.frame(title = names(median_salaries_per_title),
+                                        median_salary = median_salaries_per_title)
+median_salaries_per_title <- median_salaries_per_title %>%
+                               arrange(desc(median_salary)) %>% head(15)
+median_salaries_per_title
+```
+
+### Linear regression
+Developed countries - https://www.un.org/en/development/desa/policy/wesp/wesp_current/2014wesp_country_classification.pdf
+```{r}
+data_df <- data_df %>%
+  mutate(Experience.Level.Numeric = case_when(
+         Experience.Level == "Entry" ~ 1,
+         Experience.Level == "Mid" ~ 2,
+         Experience.Level == "Senior" ~ 3,
+         Experience.Level == "Executive" ~ 4,
+         TRUE ~ as.numeric(Experience.Level)
+  ))
+data_df <- data_df %>%
+  mutate(Company.Size.Numeric = case_when(
+         Company.Size == "Small" ~ 1,
+         Company.Size == "Medium" ~ 2,
+         Company.Size == "Large" ~ 3,
+         TRUE ~ as.numeric(Company.Size)
+  ))
+```
+```{r}
+developed_countries = c("USA",
+                        "UK",
+                        "Austria",
+                        "Belgium",
+                        "Denmark",
+                        "Finland",
+                        "France",
+                        "Germany",
+                        "Greece",
+                        "Ireland",
+                        "Italy",
+                        "Luxembourg",
+                        "Netherlands",
+                        "Portugal",
+                        "Spain",
+                        "Sweden",
+                        "Bulgaria",
+                        "Croatia",
+                        "Cyprus",
+                        "Czech Republic",
+                        "Estonia",
+                        "Hungary",
+                        "Latvia",
+                        "Lithuania",
+                        "Malta",
+                        "Poland",
+                        "Romania",
+                        "Slovakia",
+                        "Slovenia",
+                        "Iceland",
+                        "Norway",
+                        "Switzerland",
+                        "Australia",
+                        "Canada",
+                        "Japan",
+                        "New Zealand")
+
+data_df$Is.Developed <- ifelse(data_df$Employee.Residence %in% developed_countries, 1, 0)
+head(data_df)
+```
+
+```{r}
+model <- lm(Salary.in.USD ~ Year + Experience.Level.Numeric +
+                            Company.Size.Numeric + Is.Developed,
+            data = data_df)
+
+summary(model)
+```
+ If the p-value is below a significance level (e.g., 0.05), you may reject the null hypothesis and conclude that at least one predictor in the model is significant. We conclude that this model explains some data, although it may be better explained if we had more data, like revenues of the company, etc.
